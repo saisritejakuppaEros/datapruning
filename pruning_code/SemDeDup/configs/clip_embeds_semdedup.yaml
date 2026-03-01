@@ -1,0 +1,13 @@
+# SemDeDup config for CLIP embeddings
+# Replace <output_path> with your actual embeddings output directory
+# dataset_size and num_clusters are auto-filled from dataset_info.json and clustering config
+
+save_folder: "<output_path>/semdedup"
+sorted_clusters_path: "<output_path>/sorted_clusters"
+num_clusters: 50000
+embs_memory_loc: "<output_path>/embeddings.npy"
+dataset_size: 0  # replaced by run_semdedup_local
+emd_size: 768
+which_to_keep: "hard"
+seed: 1234
+largest_cluster_size_to_process: 10000000

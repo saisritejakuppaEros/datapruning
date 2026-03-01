@@ -1,0 +1,12 @@
+# SemDeDup + parquet_to_memmap dependencies
+# Install: pip install -r codes/SemDeDup/req.txt
+
+# Core (SemDeDup pipeline)
+submitit>=1.2.0
+numpy>=1.21.0
+pandas>=1.5.0
+PyYAML>=6.0
+tqdm>=4.60.0
+
+# parquet_to_memmap
+pyarrow>=12.0.0

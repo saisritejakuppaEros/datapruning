@@ -1,0 +1,18 @@
+# Clustering config for CLIP embeddings (from parquet_to_memmap.py output)
+# Replace <output_path> with your actual embeddings output directory (e.g. /path/to/semdedup_output)
+# dataset_size is auto-filled from dataset_info.json
+
+sim_metric: 'cosine'
+keep_hard: True
+Kmeans_with_cos_dist: True
+emb_memory_loc: "<output_path>/embeddings.npy"
+text_emb_memory_loc: None
+paths_memory_loc: "<output_path>/paths.npy"
+path_str_dtype: "S80"
+ncentroids: 50000
+dataset_size: 0  # replaced by run_semdedup_local from dataset_info.json
+emb_size: 768
+niter: 100
+seed: 1234
+save_folder: "<output_path>/clustering"
+sorted_clusters_file_loc: "<output_path>/sorted_clusters"
