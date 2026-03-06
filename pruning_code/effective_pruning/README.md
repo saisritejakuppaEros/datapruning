@@ -82,6 +82,21 @@ bash codes/effective_pruning/run_effective_pruning.sh
 
 **Output:** `output/effective_pruning/results/kept_paths_effective_pruning.txt` — one path per line (SemDeDup format: `rel_tar_path|path`). Use `resolve_dedup_paths.py` for full tar extraction paths.
 
+### DINO embeddings addon
+
+The same pipeline supports DINO parquet embeddings (e.g. DINOv2-L/14, 1024-dim). Use `run_effective_pruning_dino.sh`:
+
+```bash
+# Edit DINO_EMBEDS_DIR at top of script, then run from repo root
+bash codes/effective_pruning/run_effective_pruning_dino.sh
+```
+
+**Prerequisites:**
+- DINO embeddings in parquet format (same schema as CLIP: `embedding`, `path`, `rel_tar_path`, `has_embedding`) at `output/dino_embs/`
+- Convert parquets with: `python parquet_to_memmap.py --dino_embeds_dir /path/to/dino_embs --output_dir /path/to/output`
+
+**Output:** `output/effective_pruning_dino/results/kept_paths_effective_pruning_dino.txt`
+
 ## BibTeX:
 
 If you find our study or pruning technique useful, please cite our paper:

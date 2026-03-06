@@ -217,6 +217,19 @@ def load_repa_encoders(enc_type: str, device: torch.device, resolution: int = 25
         encoder_types.append(encoder_type)
 
         if "dinov2" in encoder_type:
+            # In distributed training, only rank 0 downloads first to avoid torch.hub cache race
+            if torch.distributed.is_initialized():
+                if torch.distributed.get_rank() == 0:
+                    if "reg" in encoder_type:
+                        torch.hub.load(
+                            "facebookresearch/dinov2", f"dinov2_vit{model_config}14_reg", trust_repo=True
+                        )
+                    else:
+                        torch.hub.load(
+                            "facebookresearch/dinov2", f"dinov2_vit{model_config}14", trust_repo=True
+                        )
+                torch.distributed.barrier()
+
             if "reg" in encoder_type:
                 encoder = torch.hub.load(
                     "facebookresearch/dinov2", f"dinov2_vit{model_config}14_reg", trust_repo=True

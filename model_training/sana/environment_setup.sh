@@ -25,8 +25,10 @@ fi
 # pip install torch
 
 # update pip to latest version for pyproject.toml setup.
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0
 pip install -U pip
-pip install "setuptools<65"
+# setuptools>=69 required for Python 3.12+ (ImpImporter was removed)
+pip install "setuptools>=69"
 
 # for fast attn
 pip install -U xformers==0.0.32.post2 --index-url https://download.pytorch.org/whl/cu121

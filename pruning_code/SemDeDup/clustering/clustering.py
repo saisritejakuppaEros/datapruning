@@ -16,8 +16,21 @@ import yaml
 import pprint
 import submitit
 import pathlib
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Union, Optional
 from .utils import get_logger
+
+
+def _search_chunk(args):
+    """Worker: search nearest centroid for a chunk of data. Used for CPU parallelization."""
+    start_idx, end_idx, index_path, data_path, dataset_size, emb_size = args
+    with open(index_path, "rb") as f:
+        index = pickle.load(f)
+    data = np.load(data_path, mmap_mode="r")
+    chunk = np.array(data[start_idx:end_idx], dtype=np.float32, copy=True)
+    del data
+    dist, nearest = index.search(chunk, 1)
+    return start_idx, dist.squeeze(1), nearest.squeeze(1)
 
 
 def faiss_index_to_gpu(cpu_index):
@@ -48,6 +61,7 @@ def compute_centroids(
     save_folder: str = "",
     logger: logging.Logger = None,
     verbose: bool = True,
+    data_path: Optional[str] = None,
 ):
 
     """
@@ -78,8 +92,10 @@ def compute_centroids(
     # pprint.pprint(locals(), width=1, indent=4)
 
     d = data.shape[1]
-    # -- Use GPUs for clustering when available
-    use_gpu = torch.cuda.is_available()
+    # -- Use GPUs for clustering when available (skip if FAISS_CPU_ONLY=1 or use_cpu=True,
+    #   e.g. when FAISS GPU build lacks kernels for current GPU arch like H100)
+    use_cpu = os.environ.get("FAISS_CPU_ONLY", "").lower() in ("1", "true", "yes")
+    use_gpu = torch.cuda.is_available() and not use_cpu
 
     device = "cuda" if use_gpu else "cpu"
 
@@ -142,16 +158,50 @@ def compute_centroids(
 
     ## -- Step 2) Find the nearest centroid for each data point, l2 distance search
     ## -- nearest_cent: the nearest centroid for each example in data. dist_to_cent: contains the squared L2 distances.
+    dist_to_cent_file = pathlib.Path(save_folder, "dist_to_cent.npy")
+    nearest_cent_file = pathlib.Path(save_folder, "nearest_cent.npy")
+    if dist_to_cent_file.exists() and nearest_cent_file.exists():
+        logger.info("Resuming: dist_to_cent.npy and nearest_cent.npy exist, skipping assignment step")
+        return kmeans
+
+    ## -- When on CPU, use parallel workers to utilize multiple cores (FAISS_CPU_WORKERS env var, default 4)
     start_time = time.time()
-    dist_to_cent, nearest_cent = kmeans.index.search(data, 1)
-    dist_to_cent, nearest_cent = dist_to_cent.squeeze(1), nearest_cent.squeeze(1)
+    n_samples = data.shape[0]
+    n_workers = int(os.environ.get("FAISS_CPU_WORKERS", "4"))
+    data_path = data_path or getattr(data, "filename", None)
+    if isinstance(data_path, (pathlib.Path, bytes)):
+        data_path = str(data_path)
+
+    if use_cpu and n_workers > 1 and data_path and os.path.exists(str(data_path)):
+        # Parallel CPU search: split data into chunks, process in parallel
+        chunk_size = (n_samples + n_workers - 1) // n_workers
+        chunks = [
+            (i * chunk_size, min((i + 1) * chunk_size, n_samples))
+            for i in range(n_workers)
+        ]
+        chunks = [(s, e, str(kmeans_obj_file_loc), str(data_path), n_samples, d) for s, e in chunks if s < e]
+        if len(chunks) > 1:
+            logger.info(f"Parallel assignment: {len(chunks)} workers, ~{chunk_size:,} points/worker")
+            results = {}
+            with ProcessPoolExecutor(max_workers=len(chunks)) as ex:
+                for fut in as_completed(ex.submit(_search_chunk, c) for c in chunks):
+                    start_idx, dist, nearest = fut.result()
+                    results[start_idx] = (dist, nearest)
+            order = sorted(results.keys())
+            dist_to_cent = np.concatenate([results[s][0] for s in order])
+            nearest_cent = np.concatenate([results[s][1] for s in order])
+        else:
+            dist_to_cent, nearest_cent = kmeans.index.search(data, 1)
+            dist_to_cent, nearest_cent = dist_to_cent.squeeze(1), nearest_cent.squeeze(1)
+    else:
+        dist_to_cent, nearest_cent = kmeans.index.search(data, 1)
+        dist_to_cent, nearest_cent = dist_to_cent.squeeze(1), nearest_cent.squeeze(1)
+
     logger.info(
         f"Time for finding nearest centroid for each data point (mins): {(time.time()-start_time)/(60):.2f}"
     )
 
     ## -- save faiss nearest_cent and dist_to_cent as .npy files
-    dist_to_cent_file = pathlib.Path(save_folder, "dist_to_cent.npy")
-    nearest_cent_file = pathlib.Path(save_folder, "nearest_cent.npy")
     np.save(dist_to_cent_file, dist_to_cent)
     np.save(nearest_cent_file, nearest_cent)
 

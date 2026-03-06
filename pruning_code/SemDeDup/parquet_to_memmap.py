@@ -1,5 +1,9 @@
 """
-Convert CLIP parquet embeddings (from clip_embeds_gen.py) to SemDeDup memmap format.
+Convert CLIP or DINO parquet embeddings to SemDeDup memmap format.
+
+Supports both --clip_embeds_dir and --dino_embeds_dir. Parquet schema is the same
+(embedding, path, rel_tar_path, has_embedding). Embedding dimension is inferred
+from data (CLIP: 768, DINOv2-L: 1024, DINOv2-B: 768).
 
 Handles incomplete embeddings: filters invalid/NaN, skips missing parquet files,
 and reports a summary of excluded rows.
@@ -31,19 +35,24 @@ def setup_logging():
 logger = setup_logging()
 
 
-def get_parquet_files(clip_embeds_dir: str, limit: int = None):
+def get_parquet_files(embeds_dir: str, limit: int = None):
     """
     Get parquet files to process. Uses source_to_parquet_mapping.json if present;
     otherwise globs *.parquet. Only returns files that exist on disk.
     limit: max number of parquet files to return (for testing).
     """
-    mapping_file = os.path.join(clip_embeds_dir, "source_to_parquet_mapping.json")
+    mapping_file = os.path.join(embeds_dir, "source_to_parquet_mapping.json")
     if os.path.exists(mapping_file):
-        with open(mapping_file, "r") as f:
-            mapping = json.load(f)
+        try:
+            with open(mapping_file, "r") as f:
+                content = f.read().strip()
+                mapping = json.loads(content) if content else {}
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid or empty {mapping_file}: {e}. Falling back to glob *.parquet")
+            mapping = {}
         parquet_files = []
         for rel_tar_path, parquet_name in sorted(mapping.items()):
-            parquet_path = os.path.join(clip_embeds_dir, parquet_name)
+            parquet_path = os.path.join(embeds_dir, parquet_name)
             if os.path.exists(parquet_path):
                 parquet_files.append((rel_tar_path, parquet_path))
             else:
@@ -54,7 +63,7 @@ def get_parquet_files(clip_embeds_dir: str, limit: int = None):
             return parquet_files
         logger.warning("Mapping found but no parquet files exist; falling back to glob")
 
-    parquet_paths = sorted(glob.glob(os.path.join(clip_embeds_dir, "*.parquet")))
+    parquet_paths = sorted(glob.glob(os.path.join(embeds_dir, "*.parquet")))
     result = [(None, p) for p in parquet_paths]
     if limit:
         result = result[:limit]
@@ -127,7 +136,7 @@ def _load_parquet_item(args):
 
 
 def main(
-    clip_embeds_dir: str,
+    embeds_dir: str,
     output_dir: str,
     dataset_path: str = None,
     limit: int = None,
@@ -135,11 +144,11 @@ def main(
 ):
     os.makedirs(output_dir, exist_ok=True)
 
-    parquet_items = get_parquet_files(clip_embeds_dir, limit=limit)
+    parquet_items = get_parquet_files(embeds_dir, limit=limit)
     if not parquet_items:
-        raise ValueError(f"No parquet files found in {clip_embeds_dir}")
+        raise ValueError(f"No parquet files found in {embeds_dir}")
 
-    logger.info(f"Processing {len(parquet_items)} parquet files (workers={workers})")
+    logger.info(f"Processing {len(parquet_items)} parquet files from {embeds_dir} (workers={workers})")
 
     all_embeddings = []
     all_paths = []
@@ -159,9 +168,10 @@ def main(
                 all_embeddings.append(embs)
                 all_paths.extend(paths)
     else:
+        chunksize = 1  # per-file for responsive progress bar
         with ProcessPoolExecutor(max_workers=workers) as executor:
             for embs, paths, n_total, skip_no_emb, skip_nan in tqdm(
-                executor.map(_load_parquet_item, parquet_items, chunksize=1),
+                executor.map(_load_parquet_item, parquet_items, chunksize=chunksize),
                 total=len(parquet_items),
                 desc="Reading parquets",
             ):
@@ -215,13 +225,20 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Convert CLIP parquet embeddings to SemDeDup memmap format"
+        description="Convert CLIP or DINO parquet embeddings to SemDeDup memmap format"
     )
-    parser.add_argument(
+    embeds_group = parser.add_mutually_exclusive_group(required=True)
+    embeds_group.add_argument(
         "--clip_embeds_dir",
         type=str,
-        required=True,
-        help="Directory containing clip_embeds parquet files (e.g. output/clip_embeds)",
+        default=None,
+        help="Directory containing CLIP parquet files (e.g. output/clip_embeds)",
+    )
+    embeds_group.add_argument(
+        "--dino_embeds_dir",
+        type=str,
+        default=None,
+        help="Directory containing DINO parquet files (e.g. output/dino_embs). Same schema as CLIP.",
     )
     parser.add_argument(
         "--output_dir",
@@ -245,12 +262,13 @@ if __name__ == "__main__":
         "-j",
         "--workers",
         type=int,
-        default=1,
-        help="Number of parallel workers for reading parquet files (default: 1)",
+        default=8,
+        help="Number of parallel workers for reading parquet files (default: 8)",
     )
     args = parser.parse_args()
+    embeds_dir = args.dino_embeds_dir or args.clip_embeds_dir
     main(
-        clip_embeds_dir=args.clip_embeds_dir,
+        embeds_dir=embeds_dir,
         output_dir=args.output_dir,
         dataset_path=args.dataset_path,
         limit=args.limit,

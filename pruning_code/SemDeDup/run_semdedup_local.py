@@ -40,7 +40,7 @@ def load_dataset_info(embeddings_dir: str):
         return json.load(f)
 
 
-def run_clustering(embeddings_dir: str, ncentroids: int, seed: int):
+def run_clustering(embeddings_dir: str, ncentroids: int, seed: int, use_cpu: bool = False):
     info = load_dataset_info(embeddings_dir)
     dataset_size = info["dataset_size"]
     emb_size = info["emb_size"]
@@ -66,16 +66,19 @@ def run_clustering(embeddings_dir: str, ncentroids: int, seed: int):
             f"({dataset_size}, {emb_size})"
         )
 
+    if use_cpu:
+        os.environ["FAISS_CPU_ONLY"] = "1"
     logger.info(f"Running K-means: {dataset_size} points, {emb_size} dims, {ncentroids} centroids")
     compute_centroids(
         data=data,
         ncentroids=ncentroids,
-        niter=100,
+        niter=10,  # Reduced from 100 for faster convergence
         seed=seed,
         Kmeans_with_cos_dist=True,
         save_folder=save_folder,
         logger=logger,
         verbose=True,
+        data_path=os.path.abspath(emb_path),
     )
 
 
@@ -206,6 +209,11 @@ def main():
         help="Which epsilon to use when extracting paths. Default: first value from eps_list",
     )
     parser.add_argument(
+        "--cpu",
+        action="store_true",
+        help="Force FAISS to use CPU (use when GPU FAISS lacks kernels for your GPU, e.g. H100)",
+    )
+    parser.add_argument(
         "--skip_clustering",
         action="store_true",
         help="Skip steps 2-3 (clustering, sort) if already run",
@@ -220,16 +228,30 @@ def main():
         action="store_true",
         help="Only run step 5 (extract pruned paths)",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip completed steps (clustering if dist_to_cent/nearest_cent exist; sort/semdedup have per-cluster resume)",
+    )
     args = parser.parse_args()
 
     embeddings_dir = os.path.abspath(args.embeddings_dir)
     info = load_dataset_info(embeddings_dir)
     ncentroids = min(args.ncentroids, info["dataset_size"])
 
+    # --resume: skip clustering if assignment outputs already exist
+    if args.resume:
+        clustering_dir = os.path.join(embeddings_dir, "clustering")
+        if os.path.exists(os.path.join(clustering_dir, "dist_to_cent.npy")) and os.path.exists(
+            os.path.join(clustering_dir, "nearest_cent.npy")
+        ):
+            args.skip_clustering = True
+            print("Resume: dist_to_cent.npy and nearest_cent.npy exist, skipping clustering step")
+
     if not args.extract_only:
         if not args.skip_clustering:
             print("Step 2: K-means clustering...")
-            run_clustering(embeddings_dir, ncentroids, args.seed)
+            run_clustering(embeddings_dir, ncentroids, args.seed, use_cpu=args.cpu)
             print("Step 3: Sort clusters...")
             run_sort_clusters(embeddings_dir, ncentroids)
         elif not args.skip_semdedup:

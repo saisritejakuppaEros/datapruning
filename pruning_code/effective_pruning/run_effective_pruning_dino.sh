@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Effective pruning pipeline: CLIP embeddings + dataset -> kept_paths.txt (SemDeDup format)
+# Effective pruning pipeline: DINO embeddings + dataset -> kept_paths.txt (SemDeDup format)
 # Run from repo root: /mnt/data0/teja/data_pruning
+# Same pipeline as run_effective_pruning.sh but uses DINO parquet embeddings.
 
 set -e
 
-# Config
+# Config - DINO embeddings
 DATASET_PATH="/datasets/ai-core-object/d-gpu-06097851-2053-4b67-8400-b5d404c04261/teja/internet_dataset/laionasthetic_v2"
-CLIP_EMBEDS_DIR="/mnt/data0/teja/data_pruning/output/clip_embeds"
-WORK_DIR="/mnt/data0/teja/data_pruning/output/effective_pruning"
+DINO_EMBEDS_DIR="/mnt/data0/teja/data_pruning/output/dino_embs"
+WORK_DIR="/mnt/data0/teja/data_pruning/output/effective_pruning_dino"
 NUM_CENTROIDS=100
 PRUNE_RATIO=0.8
 
@@ -20,9 +21,9 @@ RESULTS_DIR="${WORK_DIR}/results"
 mkdir -p "${EMBEDDINGS_DIR}"
 mkdir -p "${RESULTS_DIR}"
 
-echo "=== Step 0: Parquet to memmap ==="
+echo "=== Step 0: Parquet to memmap (DINO) ==="
 # python "${SEMDEDUP_DIR}/parquet_to_memmap.py" \
-#   --clip_embeds_dir "${CLIP_EMBEDS_DIR}" \
+#   --dino_embeds_dir "${DINO_EMBEDS_DIR}" \
 #   --output_dir "${EMBEDDINGS_DIR}" \
 #   --dataset_path "${DATASET_PATH}" \
 #   -j 8
@@ -59,6 +60,6 @@ python "${EFFECTIVE_DIR}/prune.py" \
   --total-dataset-size "${TOTAL_SIZE}" \
   --prune-ratio "${PRUNE_RATIO}" \
   --save-dir "${RESULTS_DIR}" \
-  --output-txt "${RESULTS_DIR}/kept_paths_effective_pruning.txt"
+  --output-txt "${RESULTS_DIR}/kept_paths_effective_pruning_dino.txt"
 
-echo "=== Done. Output: ${RESULTS_DIR}/kept_paths_effective_pruning.txt ==="
+echo "=== Done. Output: ${RESULTS_DIR}/kept_paths_effective_pruning_dino.txt ==="
